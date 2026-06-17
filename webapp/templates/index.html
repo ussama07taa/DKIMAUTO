@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Linode Manager - Preview</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  </head>
+  <body class="p-4">
+    <div class="container">
+      <h1 class="mb-4">Linode - Images & Create (preview)</h1>
+
+      {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+          {% for cat, msg in messages %}
+            <div class="alert alert-{{ 'warning' if cat=='warning' else 'info' }}">{{ msg }}</div>
+          {% endfor %}
+        {% endif %}
+      {% endwith %}
+
+      <div class="row">
+        <div class="col-md-6">
+          <h5>Private Images</h5>
+          <form method="post" action="/preview">
+            <div class="mb-3">
+              <label class="form-label">Image</label>
+              <select name="image_id" class="form-select">
+                <option value="">-- select image id --</option>
+                {% for img in images %}
+                  <option value="{{ img.id }}">{{ img.label }} ({{ img.id }})</option>
+                {% endfor %}
+              </select>
+            </div>
+
+            <div class="mb-3">
+              <label class="form-label">Region</label>
+              <select name="region_index" class="form-select">
+                {% for idx, name in regions %}
+                  <option value="{{ idx }}">{{ idx }} - {{ name }}</option>
+                {% endfor %}
+              </select>
+            </div>
+
+            <div class="mb-3">
+              <label class="form-label">Number of instances</label>
+              <input name="count" class="form-control" value="1">
+            </div>
+
+            <div class="form-check mb-3">
+              <input class="form-check-input" type="checkbox" name="use_ssh_key" id="sshkey">
+              <label class="form-check-label" for="sshkey">Use SSH key (recommended)</label>
+            </div>
+
+            <button class="btn btn-primary" type="submit">Preview actions</button>
+          </form>
+        </div>
+
+        <div class="col-md-6">
+          <h5>Preview</h5>
+          {% if preview %}
+            <pre class="bg-light p-3">Image ID: {{ preview.image_id }}
+Region: {{ preview.region_index }} - {{ preview.region_name }}
+Count: {{ preview.count }}
+Use SSH key: {{ preview.use_ssh_key }}</pre>
+            <div class="alert alert-secondary">This is a non-destructive preview only.</div>
+          {% else %}
+            <div class="text-muted">Submit the form to see a non-destructive preview.</div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </body>
+</html>
