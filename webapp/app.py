@@ -1,5 +1,6 @@
 import os
 import json
+import requests
 from flask import Flask, render_template, request, flash
 
 try:
@@ -12,7 +13,6 @@ app.secret_key = os.environ.get('FLASK_SECRET', 'devkey')
 
 
 def load_apis():
-    # try to load MJ-API from repo root
     base = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
     path = os.path.join(base, 'MJ-API')
     if not os.path.exists(path):
@@ -21,8 +21,8 @@ def load_apis():
         return json.load(f)
 
 
-# Region mapping (index, display name)
-REGIONS = [
+# LINODE Regions
+LINODE_REGIONS = [
     ("0", "Mumbai, IN"),
     ("1", "Toronto, ON"),
     ("2", "Sydney, AU"),
@@ -36,51 +36,131 @@ REGIONS = [
     ("10", "Tokyo, JP"),
 ]
 
+# SCALEWAY Zones
+SCALEWAY_ZONES = [
+    ("fr-par-1", "Paris 1, FR"),
+    ("fr-par-2", "Paris 2, FR"),
+    ("fr-par-3", "Paris 3, FR"),
+    ("nl-ams-1", "Amsterdam 1, NL"),
+    ("nl-ams-2", "Amsterdam 2, NL"),
+    ("nl-ams-3", "Amsterdam 3, NL"),
+    ("pl-waw-1", "Warsaw 1, PL"),
+    ("pl-waw-2", "Warsaw 2, PL"),
+    ("pl-waw-3", "Warsaw 3, PL"),
+]
+
+SCALEWAY_API = "https://api.scaleway.com/instance/v1/zones"
+
+
+def get_linode_images(apis):
+    """Fetch private images from Linode."""
+    images = []
+    if not LinodeClient:
+        flash('linode_api4 package not installed.', 'warning')
+        return images
+    if not apis.get('API1'):
+        flash('MJ-API missing API1 token.', 'info')
+        return images
+    try:
+        client = LinodeClient(apis['API1'])
+        imgs = client.images()
+        images = [img for img in imgs if img.created_by == apis.get('Linode_user')]
+        images.sort(key=lambda i: i.created, reverse=True)
+    except Exception as e:
+        flash(f'Linode API error: {e}', 'warning')
+    return images
+
+
+def get_scaleway_images(apis, zone):
+    """Fetch private images from Scaleway."""
+    images = []
+    if not apis.get('scaleway_token'):
+        flash('MJ-API missing scaleway_token.', 'info')
+        return images
+    headers = {
+        "X-Auth-Token": apis['scaleway_token'],
+        "Content-Type": "application/json"
+    }
+    url = f"{SCALEWAY_API}/{zone}/images"
+    try:
+        r = requests.get(url, headers=headers, timeout=30)
+        r.raise_for_status()
+        data = r.json()
+        for img in data.get("images", []):
+            if img.get("root_volume"):
+                images.append({
+                    'id': img['id'],
+                    'name': img['name'],
+                    'created': img.get('creation_date', 'unknown')
+                })
+    except Exception as e:
+        flash(f'Scaleway API error: {e}', 'warning')
+    return images
+
 
 @app.route('/')
 def index():
     apis = load_apis()
+    provider = request.args.get('provider', 'linode')
     images = []
-    if LinodeClient and apis.get('API1'):
-        try:
-            client = LinodeClient(apis['API1'])
-            imgs = client.images()
-            images = [img for img in imgs if img.created_by == apis.get('Linode_user')]
-            images.sort(key=lambda i: i.created, reverse=True)
-        except Exception as e:
-            flash(f'Linode API error: {e}', 'warning')
-    else:
-        if not LinodeClient:
-            flash('linode_api4 package not installed.', 'warning')
-        else:
-            flash('MJ-API not configured or missing API1 token.', 'info')
+    regions = []
 
-    return render_template('index.html', images=images, regions=REGIONS)
+    if provider == 'linode':
+        images = get_linode_images(apis)
+        regions = LINODE_REGIONS
+    elif provider == 'scaleway':
+        zone = request.args.get('zone', 'fr-par-1')
+        images = get_scaleway_images(apis, zone)
+        regions = SCALEWAY_ZONES
+
+    return render_template(
+        'index.html',
+        images=images,
+        regions=regions,
+        provider=provider,
+        apis=apis
+    )
 
 
 @app.route('/preview', methods=['POST'])
 def preview():
+    provider = request.form.get('provider', 'linode')
     image_id = request.form.get('image_id')
     region_index = request.form.get('region_index')
+    zone = request.form.get('zone')
     count = request.form.get('count') or '1'
     use_ssh_key = bool(request.form.get('use_ssh_key'))
+
     try:
         count_int = int(count)
+        if count_int <= 0 or count_int > 500:
+            count_int = 1
     except Exception:
         count_int = 1
 
-    region_name = dict(REGIONS).get(region_index, 'unknown')
+    if provider == 'linode':
+        region_name = dict(LINODE_REGIONS).get(region_index, 'unknown')
+    else:
+        region_name = dict(SCALEWAY_ZONES).get(zone, 'unknown')
 
-    preview = {
+    preview_data = {
+        'provider': provider,
         'image_id': image_id,
         'region_index': region_index,
+        'zone': zone,
         'region_name': region_name,
         'count': count_int,
         'use_ssh_key': use_ssh_key,
     }
 
-    # Non-destructive: we do not call Linode instance_create here.
-    return render_template('index.html', preview=preview, images=[], regions=REGIONS)
+    flash('Preview mode — no instances created.', 'info')
+    return render_template(
+        'index.html',
+        preview=preview_data,
+        images=[],
+        regions=LINODE_REGIONS if provider == 'linode' else SCALEWAY_ZONES,
+        provider=provider
+    )
 
 
 if __name__ == '__main__':
